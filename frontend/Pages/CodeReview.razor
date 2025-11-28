@@ -1,0 +1,178 @@
+﻿@page "/codeReview"
+@using Microsoft.AspNetCore.Components.Forms
+@inject HttpClient Http
+
+<PageTitle>Code Review AI</PageTitle>
+
+<h4>
+    Code Review AI
+</h4>
+<p class="text-muted mb-4">
+    Envie seu código e descreva o que você deseja que o agente faça.
+    Ele irá analisar e sugerir melhorias.
+</p>
+
+<EditForm Model="@_model" OnValidSubmit="HandleSubmit">
+    <DataAnnotationsValidator />
+
+    @* Seleção de arquivo *@
+    <div class="mb-3">
+        <label for="fileInput" class="form-label fw-semibold">
+            <i class="bi bi-file-earmark-code-fill"></i> Arquivo de código
+        </label>
+        <InputFile id="fileInput" class="form-control" OnChange="OnFileSelected"
+            accept=".cs,.js,.ts,.py,.java,.cpp,.c,.razor,.html,.css,.json,.xml" />
+        @if (_selectedFile != null)
+        {
+            <div class="form-text text-success">
+                ✓ Arquivo selecionado: <strong>@_selectedFile.Name</strong>
+                (@FormatFileSize(_selectedFile.Size))
+            </div>
+        }
+    </div>
+
+    @* Campo de tarefa *@
+    <div class="mb-3">
+        <label for="taskInput" class="form-label fw-semibold">
+            Qual problema/erro você quer que eu resolva?
+        </label>
+        <InputTextArea id="taskInput" class="form-control" @bind-Value="_model.Task"
+            placeholder="Ex: Revise este código, explique que erro é este, sugira melhorias de performance, encontre bugs..." rows="3" />
+        <ValidationMessage For="@(() => _model.Task)" />
+    </div>
+
+    @* Botão de envio *@
+    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+        <button type="button" class="btn btn-outline-secondary" @onclick="ClearForm" disabled="@_isLoading">
+            Limpar
+        </button>
+        <button type="submit" class="btn btn-primary" disabled="@(_isLoading || _selectedFile == null)">
+            @if (_isLoading)
+            {
+                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                <span>Enviando...</span>
+            }
+            else
+            {
+                <span>Enviar para análise</span>
+            }
+        </button>
+    </div>
+</EditForm>
+
+@* Mensagem de status *@
+@if (!string.IsNullOrEmpty(_statusMessage))
+{
+    <div class="alert @_statusCssClass mt-4 mb-0" role="alert">
+        @_statusMessage
+    </div>
+}
+
+@* Área de resposta da IA *@
+@if (!string.IsNullOrEmpty(_aiResponse))
+{
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0">Resposta do Agente</h5>
+        </div>
+        <div class="card-body">
+            <pre class="bg-light p-3 rounded"><code>@_aiResponse</code></pre>
+        </div>
+    </div>
+}
+
+@code {
+    private IBrowserFile? _selectedFile;
+    private readonly CodeReviewModel _model = new();
+    private bool _isLoading;
+    private string _statusMessage = string.Empty;
+    private string _statusCssClass = "alert-info";
+    private string _aiResponse = string.Empty;
+
+    private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
+    private const string ApiEndpoint = "https://api.example.com/upload"; // TODO: Configurar endpoint real
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _selectedFile = e.File;
+        _statusMessage = string.Empty;
+        StateHasChanged();
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (_selectedFile == null)
+        {
+            SetStatus("Selecione um arquivo antes de enviar.", isError: true);
+            return;
+        }
+
+        _isLoading = true;
+        _aiResponse = string.Empty;
+        SetStatus("Enviando arquivo para análise...", isError: false);
+
+        try
+        {
+            using var content = new MultipartFormDataContent();
+
+            await using var stream = _selectedFile.OpenReadStream(MaxFileSize);
+            var streamContent = new StreamContent(stream);
+
+            var contentType = string.IsNullOrEmpty(_selectedFile.ContentType)
+            ? "application/octet-stream"
+            : _selectedFile.ContentType;
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+
+            content.Add(streamContent, "file", _selectedFile.Name);
+            content.Add(new StringContent(_model.Task ?? string.Empty), "task");
+
+            var response = await Http.PostAsync(ApiEndpoint, content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _aiResponse = await response.Content.ReadAsStringAsync();
+                SetStatus("✓ Análise concluída com sucesso!", isError: false, isSuccess: true);
+            }
+            else
+            {
+                SetStatus($"Erro no servidor: {(int)response.StatusCode} - {response.ReasonPhrase}", isError: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Erro ao enviar: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void ClearForm()
+    {
+        _selectedFile = null;
+        _model.Task = string.Empty;
+        _statusMessage = string.Empty;
+        _aiResponse = string.Empty;
+    }
+
+    private void SetStatus(string message, bool isError, bool isSuccess = false)
+    {
+        _statusMessage = message;
+        _statusCssClass = isError ? "alert-danger" : (isSuccess ? "alert-success" : "alert-info");
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024)
+            return $"{bytes} B";
+        if (bytes < 1024 * 1024)
+            return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F2} MB";
+    }
+
+    public class CodeReviewModel
+    {
+        public string Task { get; set; } = string.Empty;
+    }
+}
