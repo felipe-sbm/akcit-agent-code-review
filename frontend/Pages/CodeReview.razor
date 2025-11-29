@@ -90,7 +90,7 @@
     private string _aiResponse = string.Empty;
 
     private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
-    private const string ApiEndpoint = "https://api.example.com/upload"; // TODO: Configurar endpoint real
+    private const string ApiEndpoint = "http://localhost:5000/api/review"; // Backend Flask local
 
     private void OnFileSelected(InputFileChangeEventArgs e)
     {
@@ -127,15 +127,21 @@
             content.Add(new StringContent(_model.Task ?? string.Empty), "task");
 
             var response = await Http.PostAsync(ApiEndpoint, content);
+            var jsonResponse = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)
             {
-                _aiResponse = await response.Content.ReadAsStringAsync();
+                var result = System.Text.Json.JsonSerializer.Deserialize<ReviewResponse>(jsonResponse, 
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                
+                _aiResponse = result?.AiResponse ?? "Resposta vazia do servidor";
                 SetStatus("✓ Análise concluída com sucesso!", isError: false, isSuccess: true);
             }
             else
             {
-                SetStatus($"Erro no servidor: {(int)response.StatusCode} - {response.ReasonPhrase}", isError: true);
+                var errorResult = System.Text.Json.JsonSerializer.Deserialize<ErrorResponse>(jsonResponse,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                SetStatus($"Erro: {errorResult?.Error ?? response.ReasonPhrase}", isError: true);
             }
         }
         catch (Exception ex)
@@ -174,5 +180,19 @@
     public class CodeReviewModel
     {
         public string Task { get; set; } = string.Empty;
+    }
+
+    public class ReviewResponse
+    {
+        public string Status { get; set; } = string.Empty;
+        public string Filename { get; set; } = string.Empty;
+        public string Task { get; set; } = string.Empty;
+        public string CodePreview { get; set; } = string.Empty;
+        public string AiResponse { get; set; } = string.Empty;
+    }
+
+    public class ErrorResponse
+    {
+        public string Error { get; set; } = string.Empty;
     }
 }
